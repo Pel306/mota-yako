@@ -1,36 +1,42 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Mota Yako
 
-## Getting Started
+## Local setup
 
-First, run the development server:
+1. Copy `.env.example` to `.env.local` and set `DATABASE_URL`, `STORAGE_ACCESS_KEY_ID`, `STORAGE_SECRET_ACCESS_KEY`, and `AUTH_CODE_SECRET`. Keep `.env.local` out of source control.
+2. Start PostgreSQL and MinIO. With Docker Desktop running, start the object store and create its public-read vehicle-photo bucket:
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+   ```powershell
+   npm run storage:up
+   ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+   The command starts MinIO, creates the configured bucket if needed, and applies a read-only public policy so buyers can load listing photos. Compose reads credentials from `.env.local`; the MinIO root user/password are the same as the application storage access key/secret. Only vehicle photos are stored in the public bucket. Never put identity documents in this bucket.
+3. Apply the database migrations:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+   ```powershell
+   npm run db:migrate
+   ```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+4. Start the website:
 
-## Learn More
+   ```powershell
+   npm run dev
+   ```
 
-To learn more about Next.js, take a look at the following resources:
+   The local site uses `http://localhost:4000` when `PORT=4000` is set.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Seller and buyer flows
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- Sellers create private or dealer profiles and verify their Zimbabwe mobile number with a one-time code.
+- In development, `SMS_PROVIDER=console` displays verification codes in the relevant sign-in or password screen. This mode is disabled in production.
+- To send real messages, set `SMS_PROVIDER=twilio` and provide `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, and `TWILIO_FROM_NUMBER` in the deployment environment.
+- Sellers upload vehicle photos to MinIO, submit listings for review, and manage their listings and buyer enquiries from `/seller`. The database stores each MinIO image URL with the listing.
+- Admins sign in separately from sellers and dealers at `/admin/sign-in` with a password. Add comma-separated bootstrap admin numbers to `ADMIN_PHONES`; after `npm run db:migrate`, each passwordless admin can request an SMS code and set an initial password. Do not rely on phone verification as identity or business KYC.
+- Bootstrap managers must be listed in both `ADMIN_PHONES` and `ADMIN_MANAGER_PHONES`. They can create up to five total admin accounts; each new admin sets their own password after verifying their phone by SMS on first sign-in. Subsequent password changes require the current password and a fresh SMS code. Managers can update profiles, revoke access, and request verified phone changes. Set a private 32-byte hexadecimal `ADMIN_ID_ENCRYPTION_KEY` to encrypt optional admin ID numbers at rest; do not use this field as a substitute for KYC.
+- Buyers can submit enquiries without an account. Their contact details are visible only to the seller who owns the listing.
+- Existing design-guide sample cars remain visible and are not real listings.
 
-## Deploy on Vercel
+The database stores seller profiles, sessions, pending/published listings, buyer enquiries, and listing review history. Listing plan prices remain informational; no payment provider or identity/business KYC provider is configured.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Production setup
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Set every secret in the hosting provider's environment configuration rather than committing `.env.local`. Use a reachable PostgreSQL database and S3-compatible object store; set `STORAGE_PUBLIC_URL` to the public base URL for the vehicle-photo bucket. Set `SMS_PROVIDER=twilio`, Twilio credentials, `ADMIN_PHONES`, `ADMIN_MANAGER_PHONES`, a strong random `AUTH_CODE_SECRET`, and a private 32-byte hexadecimal `ADMIN_ID_ENCRYPTION_KEY`. Keep the admin ID encryption key stable and backed up; losing it makes stored ID numbers unreadable. Apply migrations as part of deployment before starting application instances.

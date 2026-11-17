@@ -70,7 +70,7 @@ export default async function CarDetailPage({
                     {isSample && car.sellerType === "dealer" ? (
                       <div className="rating">★ 4.8 · 32 reviews (sample)</div>
                     ) : isSample ? (
-                      <div className="rating">Identity status shown as a design placeholder</div>
+                      <div className="rating">Identity status shown as a 1 design placeholder</div>
                     ) : null}
                     {car.sellerType === "dealer" && isSample && <Link className="small" href="/dealers/harare-auto-hub">View dealer profile →</Link>}
                     {car.sellerType === "dealer" && !isSample && car.sellerId && <Link className="small" href={`/dealers/${car.sellerId}`}>View dealer profile →</Link>}

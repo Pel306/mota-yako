@@ -1,7 +1,7 @@
-export function cn(...inputs: any[]): string {
+export function cn(...inputs: unknown[]): string {
   const parts: string[] = [];
 
-  const collect = (value: any) => {
+  const collect = (value: unknown) => {
     if (value === null || value === undefined || value === false || value === "") {
       return;
     }
@@ -12,7 +12,7 @@ export function cn(...inputs: any[]): string {
     }
 
     if (typeof value === "object") {
-      Object.entries(value).forEach(([key, enabled]) => {
+      Object.entries(value as Record<string, unknown>).forEach(([key, enabled]) => {
         if (enabled) {
           parts.push(key);
         }

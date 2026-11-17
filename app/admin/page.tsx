@@ -1,3 +1,4 @@
+import { connection } from "next/server";
 import Image from "next/image";
 import Link from "next/link";
 import { redirect } from "next/navigation";
@@ -10,6 +11,8 @@ import { getAdminIdLastFour } from "@/lib/admin-id";
 import { db } from "@/lib/db";
 import { adminUsers, cars, sellers } from "@/src/db/schema";
 
+export const instant = false;
+
 const documentLabels: Record<string, string> = {
   "book-of-life": "Book of life",
   "zinara-plate": "ZINARA plate",
@@ -18,6 +21,7 @@ const documentLabels: Record<string, string> = {
 };
 
 export default async function AdminPage() {
+  await connection();
   const admin = await getAdminSession();
   if (!admin) redirect("/admin/sign-in");
   if (admin.mustChangePassword) redirect("/admin/change-password");
@@ -210,3 +214,4 @@ export default async function AdminPage() {
     </main>
   );
 }
+

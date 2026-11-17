@@ -1,6 +1,13 @@
 "use client";
 
-import { createContext, useContext, useState, useEffect, ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react";
 
 interface ThemeContextType {
   isDarkMode: boolean;
@@ -10,50 +17,57 @@ interface ThemeContextType {
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
-export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [isDarkMode, setIsDarkMode] = useState(false); // Default light for SSR
-  const [mounted, setMounted] = useState(false);
+const themeStorageKey = "zimpost-theme";
+const colorSchemeQuery = "(prefers-color-scheme: dark)";
+const themeListeners = new Set<() => void>();
 
-  // Initialize theme from localStorage or system preference
-  useEffect(() => {
-    setMounted(true);
-    const saved = localStorage.getItem("zimpost-theme");
-    if (saved !== null) {
-      setIsDarkMode(saved === "dark");
-    } else {
-      // Fall back to system preference
-      setIsDarkMode(window.matchMedia("(prefers-color-scheme: dark)").matches);
-    }
+function subscribeToThemeChanges(callback: () => void) {
+  const mediaQuery = window.matchMedia(colorSchemeQuery);
+  themeListeners.add(callback);
+  mediaQuery.addEventListener("change", callback);
+  window.addEventListener("storage", callback);
+
+  return () => {
+    themeListeners.delete(callback);
+    mediaQuery.removeEventListener("change", callback);
+    window.removeEventListener("storage", callback);
+  };
+}
+
+function getThemeSnapshot() {
+  const savedTheme = localStorage.getItem(themeStorageKey);
+  return savedTheme === null
+    ? window.matchMedia(colorSchemeQuery).matches
+    : savedTheme === "dark";
+}
+
+function getServerThemeSnapshot() {
+  return false;
+}
+
+export function ThemeProvider({ children }: { children: ReactNode }) {
+  const isDarkMode = useSyncExternalStore(
+    subscribeToThemeChanges,
+    getThemeSnapshot,
+    getServerThemeSnapshot,
+  );
+  const setIsDarkMode = useCallback((dark: boolean) => {
+    localStorage.setItem(themeStorageKey, dark ? "dark" : "light");
+    themeListeners.forEach((listener) => listener());
   }, []);
 
-  // Apply theme class to document and save to localStorage
   useEffect(() => {
-    if (!mounted) return;
-
     const root = document.documentElement;
     if (isDarkMode) {
       root.classList.add("dark");
     } else {
       root.classList.remove("dark");
     }
-    localStorage.setItem("zimpost-theme", isDarkMode ? "dark" : "light");
-  }, [isDarkMode, mounted]);
+  }, [isDarkMode]);
 
-  // Listen for system theme changes (if no saved preference)
-  useEffect(() => {
-    const saved = localStorage.getItem("zimpost-theme");
-    if (saved !== null) return;
-
-    const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
-    const handleChange = (e: MediaQueryListEvent) => {
-      setIsDarkMode(e.matches);
-    };
-
-    mediaQuery.addEventListener("change", handleChange);
-    return () => mediaQuery.removeEventListener("change", handleChange);
-  }, []);
-
-  const toggleTheme = () => setIsDarkMode(!isDarkMode);
+  const toggleTheme = useCallback(() => {
+    setIsDarkMode(!isDarkMode);
+  }, [isDarkMode, setIsDarkMode]);
 
   return (
     <ThemeContext.Provider value={{ isDarkMode, setIsDarkMode, toggleTheme }}>

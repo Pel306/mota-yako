@@ -21,7 +21,7 @@ interface UploadResponse {
 const plans: { id: Plan; name: string; price: number; details: string; sellers: SellerType[] }[] = [
   { id: "basic", name: "Basic", price: 5, details: "30 days · 3 photos", sellers: ["private"] },
   { id: "featured", name: "Featured", price: 15, details: "60 days · 8 photos · priority", sellers: ["private", "dealer"] },
-  { id: "dealer", name: "Dealer", price: 25, details: "5 vehicles · homepage slot", sellers: ["dealer"] },
+  { id: "dealer", name: "Dealer", price: 45, details: "5 vehicles · homepage slot", sellers: ["dealer"] },
 ];
 
 function isUploadResponse(value: unknown): value is UploadResponse {

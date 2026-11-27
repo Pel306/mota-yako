@@ -7,7 +7,7 @@ import {
   requestAdminPhoneChange,
   updateAdminDetails,
   verifyAdminPhoneChange,
-} from "@/src/app/actions/admin-accounts";
+} from "@/app/actions/admin-accounts";
 
 export type AdminAccountSummary = {
   id: string;

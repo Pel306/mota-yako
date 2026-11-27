@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   changeAdminPassword,
   requestAdminPasswordChangeCode,
-} from "@/src/app/actions/admin-auth";
+} from "@/app/actions/admin-auth";
 
 export function ChangeAdminPasswordForm({ mustChangePassword }: { mustChangePassword: boolean }) {
   const router = useRouter();

@@ -38,11 +38,12 @@ export async function createAdminAccount(formData: FormData) {
   await requireAdminManager();
   const name = readText(formData, "name");
   const phone = normalizeZimbabwePhone(readText(formData, "phone"));
+  const email = readText(formData, "email").toLowerCase();
   const organizationName = readText(formData, "organizationName");
   const idNumber = readText(formData, "idNumber");
 
-  if (name.length < 2 || name.length > 120 || !phone || organizationName.length > 160 || idNumber.length > 100) {
-    return { ok: false, error: "Enter a valid name, Zimbabwe mobile number, organization, and optional ID number." };
+  if (name.length < 2 || name.length > 120 || !phone || (email && (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) || organizationName.length > 160 || idNumber.length > 100) {
+    return { ok: false, error: "Enter a valid name, Zimbabwe mobile number, optional email, organization, and optional ID number." };
   }
 
   try {
@@ -57,6 +58,7 @@ export async function createAdminAccount(formData: FormData) {
     await db.insert(adminUsers).values({
       name,
       phone,
+      email: email || null,
       passwordHash: null,
       organizationName: organizationName || null,
       idNumberEncrypted: encryptOptionalId(idNumber),
@@ -75,10 +77,11 @@ export async function updateAdminDetails(formData: FormData) {
   const manager = await requireAdminManager();
   const adminId = readText(formData, "adminId");
   const name = readText(formData, "name");
+  const email = readText(formData, "email").toLowerCase();
   const organizationName = readText(formData, "organizationName");
   const idNumber = readText(formData, "idNumber");
   if (!/^[\da-f]{8}-(?:[\da-f]{4}-){3}[\da-f]{12}$/i.test(adminId) ||
-      name.length < 2 || name.length > 120 || organizationName.length > 160 || idNumber.length > 100) {
+      name.length < 2 || name.length > 120 || (email && (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) || organizationName.length > 160 || idNumber.length > 100) {
     throw new Error("Enter valid admin profile details.");
   }
 
@@ -88,6 +91,7 @@ export async function updateAdminDetails(formData: FormData) {
 
   await db.update(adminUsers).set({
     name,
+    email: email || null,
     organizationName: organizationName || null,
     idNumberEncrypted: encryptOptionalId(idNumber),
   }).where(eq(adminUsers.id, adminId));

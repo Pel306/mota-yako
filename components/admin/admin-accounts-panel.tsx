@@ -13,6 +13,7 @@ export type AdminAccountSummary = {
   id: string;
   name: string;
   phone: string;
+  email: string | null;
   organizationName: string | null;
   idNumberLastFour: string | null;
   canManageAdmins: boolean;
@@ -120,7 +121,7 @@ export function AdminAccountsPanel({
             <div style={{ flex: 1, minWidth: 0 }}>
               <strong>{account.name}</strong>
               <div className="meta">
-                {account.phone} · {account.organizationName || "No organization"} · {account.canManageAdmins ? "Admin manager" : "Admin"}
+                {account.phone} · {account.email || "No reset email"} · {account.organizationName || "No organization"} · {account.canManageAdmins ? "Admin manager" : "Admin"}
                 {account.idNumberLastFour ? ` · ID ending ${account.idNumberLastFour}` : " · No ID number"}
               </div>
               {canManageAdmins && (
@@ -130,6 +131,7 @@ export function AdminAccountsPanel({
                     <form action={updateAdminDetails} className="form-grid" style={{ marginTop: 10 }}>
                       <input type="hidden" name="adminId" value={account.id} />
                       <label className="field">Name<input name="name" defaultValue={account.name} required minLength={2} maxLength={120} /></label>
+                      <label className="field">Reset email<input name="email" type="email" defaultValue={account.email || ""} maxLength={254} /></label>
                       <label className="field">Organization<input name="organizationName" defaultValue={account.organizationName || ""} maxLength={160} /></label>
                       <label className="field">Optional ID number<input name="idNumber" maxLength={100} autoComplete="off" placeholder={account.idNumberLastFour ? "Enter to replace; blank removes it" : "Optional"} /></label>
                       <button className="btn btn-navy btn-sm" type="submit">Save details</button>
@@ -153,6 +155,7 @@ export function AdminAccountsPanel({
             <form onSubmit={createAccount} className="form-grid" style={{ padding: 18 }}>
               <label className="field">Full name<input name="name" required minLength={2} maxLength={120} /></label>
               <label className="field">Zimbabwe phone<input name="phone" type="tel" placeholder="+263 77 123 4567" required /></label>
+              <label className="field">Supabase reset email<input name="email" type="email" maxLength={254} /></label>
               <label className="field">Organization name<input name="organizationName" maxLength={160} /></label>
               <label className="field">Optional ID number<input name="idNumber" maxLength={100} autoComplete="off" /></label>
               <p className="small muted">The admin sets their own password at first sign-in after verifying their phone by SMS. ID numbers are encrypted at rest.</p>

@@ -71,6 +71,7 @@ export const adminUsers = pgTable("admin_users", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: varchar("name", { length: 120 }).notNull(),
   phone: varchar("phone", { length: 20 }).notNull().unique(),
+  email: varchar("email", { length: 254 }).unique(),
   passwordHash: text("password_hash"),
   organizationName: varchar("organization_name", { length: 160 }),
   idNumberEncrypted: text("id_number_encrypted"),

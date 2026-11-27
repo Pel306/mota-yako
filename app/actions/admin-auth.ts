@@ -1,13 +1,13 @@
 "use server";
 
 import { randomInt, timingSafeEqual } from "node:crypto";
-import { and, eq, gt, isNull, lt, sql } from "drizzle-orm";
+import { and, eq, gt, lt, sql } from "drizzle-orm";
 import { createAdminSession, getAdminSession, normalizeZimbabwePhone } from "@/lib/auth";
 import { hashVerificationCode } from "@/lib/auth-code";
 import { hashAdminPassword, verifyAdminPassword } from "@/lib/admin-password";
 import { db } from "@/lib/db";
 import { sendVerificationCode } from "@/lib/sms";
-import { adminAuthChallenges, adminUsers } from "@/src/db/schema";
+import { adminAuthChallenges, adminSessions, adminUsers } from "@/src/db/schema";
 
 function validPassword(password: string) {
   return password.length >= 12 && password.length <= 128;
@@ -18,10 +18,10 @@ export async function requestAdminPasswordSetup(rawPhone: string) {
   if (!phone) return { ok: false, error: "Enter a valid admin phone number." };
 
   try {
-    const [admin] = await db.select({ id: adminUsers.id, passwordHash: adminUsers.passwordHash })
+    const [admin] = await db.select({ id: adminUsers.id })
       .from(adminUsers).where(eq(adminUsers.phone, phone)).limit(1);
-    if (!admin || admin.passwordHash) {
-      return { ok: false, error: "Admin password setup is not available for this account." };
+    if (!admin) {
+      return { ok: false, error: "SMS password setup is not available for this account." };
     }
 
     const [challenge] = await db.select({ createdAt: adminAuthChallenges.createdAt })
@@ -51,11 +51,11 @@ export async function requestAdminPasswordSetup(rawPhone: string) {
     });
 
     try {
-      await sendVerificationCode(phone, code, "admin password setup");
+      await sendVerificationCode(phone, code, "admin password reset");
     } catch (error) {
       await db.delete(adminAuthChallenges).where(eq(adminAuthChallenges.phone, phone));
-      console.error("Could not send admin password setup code", error);
-      return { ok: false, error: "Could not send the setup code. Check SMS configuration." };
+      console.error("Could not send admin password reset code", error);
+      return { ok: false, error: "Could not send the SMS code. Check SMS configuration." };
     }
     return {
       ok: true,
@@ -65,8 +65,8 @@ export async function requestAdminPasswordSetup(rawPhone: string) {
         : undefined,
     };
   } catch (error) {
-    console.error("Could not start admin password setup", error);
-    return { ok: false, error: "Could not start admin password setup. Please try again." };
+    console.error("Could not start admin password reset", error);
+    return { ok: false, error: "Could not start the SMS password reset. Please try again." };
   }
 }
 
@@ -164,10 +164,10 @@ export async function completeAdminPasswordSetup(input: { phone: string; code: s
       return { ok: false, error: "That code is incorrect. Check it and try again." };
     }
 
-    const [admin] = await db.select({ id: adminUsers.id, passwordHash: adminUsers.passwordHash })
+    const [admin] = await db.select({ id: adminUsers.id })
       .from(adminUsers).where(eq(adminUsers.phone, phone)).limit(1);
-    if (!admin || admin.passwordHash) {
-      return { ok: false, error: "Admin password setup is no longer available for this account." };
+    if (!admin) {
+      return { ok: false, error: "The admin account could not be found." };
     }
     await db.transaction(async (transaction) => {
       const [consumed] = await transaction.delete(adminAuthChallenges).where(and(
@@ -180,11 +180,9 @@ export async function completeAdminPasswordSetup(input: { phone: string; code: s
       const [updated] = await transaction.update(adminUsers).set({
         passwordHash: hashAdminPassword(password),
         mustChangePassword: false,
-      }).where(and(
-        eq(adminUsers.id, admin.id),
-        isNull(adminUsers.passwordHash),
-      )).returning({ id: adminUsers.id });
-      if (!updated) throw new Error("Admin password setup has already been completed.");
+      }).where(eq(adminUsers.id, admin.id)).returning({ id: adminUsers.id });
+      if (!updated) throw new Error("Admin account no longer exists.");
+      await transaction.delete(adminSessions).where(eq(adminSessions.adminId, admin.id));
     });
     await createAdminSession(admin.id);
     return { ok: true };

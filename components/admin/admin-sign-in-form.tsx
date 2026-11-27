@@ -6,7 +6,7 @@ import {
   completeAdminPasswordSetup,
   requestAdminPasswordSetup,
   signInAdmin,
-} from "@/app/actions/admin-auth";
+} from "@/src/app/actions/admin-auth";
 import {
   completeAdminEmailSetup,
   requestAdminEmailSetupCode,

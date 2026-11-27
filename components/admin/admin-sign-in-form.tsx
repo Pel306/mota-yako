@@ -11,8 +11,7 @@ import {
   completeAdminEmailSetup,
   requestAdminEmailSetupCode,
   requestAdminSupabasePasswordReset,
-} from "@/app/actions/admin-supabase-reset";
-import { createSupabaseBrowserClient } from "@/lib/supabase/client";
+} from "@/src/app/actions/admin-supabase-reset";
 
 export function AdminSignInForm() {
   const router = useRouter();

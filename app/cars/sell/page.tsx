@@ -3,7 +3,7 @@ import Link from "next/link";
 const plans = [
   {
     name: "Basic Plan",
-    price: "$3",
+    price: "$5",
     unit: "/listing",
     items: ["Live for 30 days", "Up to 3 photos", "WhatsApp contact button"],
     tier: "private",
@@ -11,7 +11,7 @@ const plans = [
   },
   {
     name: "Featured Plan",
-    price: "$7",
+    price: "$15",
     unit: "/listing",
     items: ["Live for 60 days", "Up to 8 photos", "Priority placement in search"],
     tier: "private",
@@ -20,7 +20,7 @@ const plans = [
   },
   {
     name: "Dealer Plan",
-    price: "$25",
+    price: "$45",
     unit: "/bundle",
     items: ["List up to 5 vehicles", "Live for 60 days each", "Homepage feature slot + dealer badge"],
     tier: "dealer",

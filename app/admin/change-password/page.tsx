@@ -8,14 +8,14 @@ export const instant = false;
 export default async function ChangeAdminPasswordPage() {
   await connection();
 
-  const admin = await getAdminSession();
+  const admin = await getAdminSession({ allowPasswordChange: true });
   if (!admin) redirect("/admin/sign-in");
 
   return (
     <main id="main">
       <section className="section">
         <div className="container">
-          <ChangeAdminPasswordForm mustChangePassword={admin.mustChangePassword} />
+          <ChangeAdminPasswordForm />
         </div>
       </section>
     </main>

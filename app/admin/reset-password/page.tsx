@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { syncAdminSupabasePassword } from "@/app/actions/admin-supabase-reset";
+import { updateAdminPassword } from "@/app/actions/admin-auth";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 
 export default function AdminResetPasswordPage() {
@@ -26,18 +26,18 @@ export default function AdminResetPasswordPage() {
 
     setBusy(true);
     try {
-      const supabase = createSupabaseBrowserClient();
-      const { error: updateError } = await supabase.auth.updateUser({ password });
-      if (updateError) {
-        setError(updateError.message || "Could not update the password.");
-        return;
-      }
-      const result = await syncAdminSupabasePassword(password);
+      const result = await updateAdminPassword(password);
       if (!result.ok) {
         setError(result.error ?? "Could not finish the password reset.");
         return;
       }
-      await supabase.auth.signOut();
+
+      const supabase = createSupabaseBrowserClient();
+      const { error: signOutError } = await supabase.auth.signOut();
+      if (signOutError) {
+        setError("Password updated, but sign-out failed. Please sign out before continuing.");
+        return;
+      }
       router.replace("/admin/sign-in?reset=complete");
       router.refresh();
     } catch {

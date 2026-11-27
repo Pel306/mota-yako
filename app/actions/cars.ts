@@ -192,7 +192,6 @@ export async function createBuyerEnquiry(input: {
 export async function reviewPendingListing(input: { carId: string; status: "available" | "rejected" }) {
   const admin = await getAdminSession();
   if (!admin) throw new Error("Only an authorized marketplace admin can review listings.");
-  if (admin.mustChangePassword) throw new Error("Change your temporary password before reviewing listings.");
   if (
     typeof input?.carId !== "string" ||
     !/^[\da-f]{8}-(?:[\da-f]{4}-){3}[\da-f]{12}$/i.test(input.carId) ||

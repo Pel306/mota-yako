@@ -69,6 +69,7 @@ export const adminBootstrapRevocations = pgTable("admin_bootstrap_revocations", 
 
 export const adminUsers = pgTable("admin_users", {
   id: uuid("id").primaryKey().defaultRandom(),
+  authUserId: uuid("auth_user_id").unique(),
   name: varchar("name", { length: 120 }).notNull(),
   phone: varchar("phone", { length: 20 }).notNull().unique(),
   email: varchar("email", { length: 254 }).unique(),

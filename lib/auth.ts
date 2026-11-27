@@ -1,9 +1,9 @@
 import { createHash, randomBytes } from "node:crypto";
-import { and, eq, gt } from "drizzle-orm";
+import { and, eq, gt, isNull, sql } from "drizzle-orm";
 import { cookies } from "next/headers";
 import { db } from "@/lib/db";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 import {
-  adminSessions,
   adminUsers,
   sellerSessions,
   sellers,
@@ -11,8 +11,6 @@ import {
 
 const sessionCookieName = "mota_seller_session";
 const sessionLifetimeMs = 1000 * 60 * 60 * 24 * 30;
-const adminSessionCookieName = "mota_admin_session";
-const adminSessionLifetimeMs = 1000 * 60 * 60 * 12;
 
 export type SellerSession = {
   id: string;
@@ -24,13 +22,33 @@ export type SellerSession = {
 
 export type AdminSession = {
   id: string;
+  authUserId: string;
+  email: string;
+  mustChangePassword: boolean;
   name: string;
   phone: string;
   organizationName: string | null;
   idNumberEncrypted: string | null;
   canManageAdmins: boolean;
-  mustChangePassword: boolean;
 };
+
+type AdminSessionRecord = Omit<AdminSession, "authUserId" | "email"> & {
+  authUserId: string | null;
+  email: string | null;
+};
+
+function createAdminSession(
+  account: AdminSessionRecord,
+  email: string,
+  allowPasswordChange: boolean,
+): AdminSession | null {
+  if (!account.authUserId || (account.mustChangePassword && !allowPasswordChange)) return null;
+  return {
+    ...account,
+    authUserId: account.authUserId,
+    email: email.toLowerCase(),
+  };
+}
 
 function hashToken(token: string) {
   return createHash("sha256").update(token).digest("hex");
@@ -90,69 +108,58 @@ export function getConfiguredAdminManagerPhones() {
   return managers.length ? managers : getConfiguredAdminPhones();
 }
 
-export async function getAdminSession(): Promise<AdminSession | null> {
-  const token = (await cookies()).get(adminSessionCookieName)?.value;
-  if (!token) return null;
+export async function getAdminSession(
+  options: { allowPasswordChange?: boolean } = {},
+): Promise<AdminSession | null> {
+  const allowPasswordChange = options.allowPasswordChange === true;
+  const supabase = await createSupabaseServerClient();
+  const { data: { user }, error } = await supabase.auth.getUser();
+  if (error || !user?.email || !user.email_confirmed_at) return null;
 
-  const [account] = await db
-    .select({
-      id: adminUsers.id,
-      name: adminUsers.name,
-      phone: adminUsers.phone,
-      organizationName: adminUsers.organizationName,
-      idNumberEncrypted: adminUsers.idNumberEncrypted,
-      canManageAdmins: adminUsers.canManageAdmins,
-      mustChangePassword: adminUsers.mustChangePassword,
-    })
-    .from(adminSessions)
-    .innerJoin(adminUsers, eq(adminSessions.adminId, adminUsers.id))
-    .where(and(eq(adminSessions.tokenHash, hashToken(token)), gt(adminSessions.expiresAt, new Date())))
+  const accountColumns = {
+    id: adminUsers.id,
+    authUserId: adminUsers.authUserId,
+    email: adminUsers.email,
+    mustChangePassword: adminUsers.mustChangePassword,
+    name: adminUsers.name,
+    phone: adminUsers.phone,
+    organizationName: adminUsers.organizationName,
+    idNumberEncrypted: adminUsers.idNumberEncrypted,
+    canManageAdmins: adminUsers.canManageAdmins,
+  };
+  const [linkedAccount] = await db.select(accountColumns)
+    .from(adminUsers)
+    .where(eq(adminUsers.authUserId, user.id))
     .limit(1);
-  return account ?? null;
-}
+  if (linkedAccount) {
+    return createAdminSession(linkedAccount, linkedAccount.email ?? user.email, allowPasswordChange);
+  }
 
-export async function createAdminSession(adminId: string) {
-  const token = randomBytes(32).toString("base64url");
-  const expiresAt = new Date(Date.now() + adminSessionLifetimeMs);
-  await db.insert(adminSessions).values({
-    adminId,
-    tokenHash: hashToken(token),
-    expiresAt,
-  });
-  (await cookies()).set(adminSessionCookieName, token, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
-    path: "/",
-    expires: expiresAt,
-  });
+  const [account] = await db.select(accountColumns)
+    .from(adminUsers)
+    .where(eq(sql`lower(${adminUsers.email})`, user.email.toLowerCase()))
+    .limit(1);
+  if (!account || account.authUserId) return null;
+
+  const [linked] = await db.update(adminUsers)
+    .set({ authUserId: user.id })
+    .where(and(eq(adminUsers.id, account.id), isNull(adminUsers.authUserId)))
+    .returning(accountColumns);
+  if (linked) return createAdminSession(linked, user.email, allowPasswordChange);
+
+  const [current] = await db.select(accountColumns)
+    .from(adminUsers)
+    .where(eq(adminUsers.id, account.id))
+    .limit(1);
+  return current?.authUserId === user.id
+    ? createAdminSession(current, user.email, allowPasswordChange)
+    : null;
 }
 
 export async function clearAdminSession() {
-  const cookieStore = await cookies();
-  const token = cookieStore.get(adminSessionCookieName)?.value;
-  if (token) {
-    await db.delete(adminSessions).where(eq(adminSessions.tokenHash, hashToken(token)));
-  }
-  cookieStore.delete(adminSessionCookieName);
-}
-
-export async function isAdminPhone(phone: string) {
-  const [account] = await db
-    .select({ id: adminUsers.id })
-    .from(adminUsers)
-    .where(eq(adminUsers.phone, phone))
-    .limit(1);
-  return Boolean(account);
-}
-
-export async function isAdminManagerPhone(phone: string) {
-  const [account] = await db
-    .select({ id: adminUsers.id })
-    .from(adminUsers)
-    .where(and(eq(adminUsers.phone, phone), eq(adminUsers.canManageAdmins, true)))
-    .limit(1);
-  return Boolean(account);
+  const supabase = await createSupabaseServerClient();
+  const { error } = await supabase.auth.signOut();
+  if (error) throw error;
 }
 
 export function normalizeZimbabwePhone(value: string) {

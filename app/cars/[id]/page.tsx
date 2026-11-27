@@ -17,7 +17,7 @@ export default async function CarDetailPage({
   let car = getVehicle(id) ?? await getPublishedVehicle(id);
   if (!car) {
     const admin = await getAdminSession();
-    if (admin && !admin.mustChangePassword) car = await getDatabaseVehicle(id);
+    if (admin) car = await getDatabaseVehicle(id);
   }
 
   if (!car) notFound();

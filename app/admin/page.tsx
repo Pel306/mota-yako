@@ -22,7 +22,7 @@ const documentLabels: Record<string, string> = {
 
 export default async function AdminPage() {
   await connection();
-  const admin = await getAdminSession();
+  const admin = await getAdminSession({ allowPasswordChange: true });
   if (!admin) redirect("/admin/sign-in");
   if (admin.mustChangePassword) redirect("/admin/change-password");
   const canManageAdmins = admin.canManageAdmins;
@@ -61,6 +61,7 @@ export default async function AdminPage() {
     db
       .select({
         id: adminUsers.id,
+        authUserId: adminUsers.authUserId,
         name: adminUsers.name,
         phone: adminUsers.phone,
         email: adminUsers.email,
@@ -73,6 +74,7 @@ export default async function AdminPage() {
   ]);
   const adminList = adminRows.map((account) => ({
     id: account.id,
+    hasSupabaseAuth: Boolean(account.authUserId),
     name: account.name,
     phone: account.phone,
     email: account.email,

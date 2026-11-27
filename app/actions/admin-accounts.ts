@@ -1,28 +1,55 @@
 "use server";
 
 import { randomInt, timingSafeEqual } from "node:crypto";
-import { and, eq, gt, sql } from "drizzle-orm";
+import { and, eq, gt, isNull, ne, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import {
   getAdminSession,
   getConfiguredAdminPhones,
-  isAdminManagerPhone,
   normalizeZimbabwePhone,
 } from "@/lib/auth";
 import { encryptAdminIdNumber } from "@/lib/admin-id";
 import { hashVerificationCode } from "@/lib/auth-code";
 import { db } from "@/lib/db";
 import { sendVerificationCode } from "@/lib/sms";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { authCallbackUrl } from "@/lib/supabase/redirect-url";
 import { adminBootstrapRevocations, adminPhoneChanges, adminUsers } from "@/src/db/schema";
 
 const adminLimit = 5;
 
 async function requireAdminManager() {
   const session = await getAdminSession();
-  if (!session || session.mustChangePassword || !await isAdminManagerPhone(session.phone)) {
+  if (!session?.canManageAdmins) {
     throw new Error("Only an authorized admin manager can manage admin accounts.");
   }
   return session;
+}
+
+async function findOrInviteSupabaseUser(email: string) {
+  const supabase = createSupabaseAdminClient();
+  const perPage = 1000;
+  for (let page = 1; ; page += 1) {
+    const { data, error } = await supabase.auth.admin.listUsers({ page, perPage });
+    if (error) throw error;
+
+    const existingUser = data.users.find((user) => user.email?.toLowerCase() === email);
+    if (existingUser) {
+      if (!existingUser.email_confirmed_at) {
+        throw new Error("This email already has an unconfirmed Supabase Auth account.");
+      }
+      return { userId: existingUser.id, invited: false, supabase };
+    }
+    if (data.users.length < perPage) break;
+  }
+
+  const { data: invitation, error: inviteError } = await supabase.auth.admin.inviteUserByEmail(email, {
+    redirectTo: authCallbackUrl("/admin/change-password"),
+  });
+  if (inviteError) throw inviteError;
+  if (!invitation.user) throw new Error("Supabase did not return the invited user.");
+
+  return { userId: invitation.user.id, invited: true, supabase };
 }
 
 function readText(formData: FormData, name: string) {
@@ -42,34 +69,115 @@ export async function createAdminAccount(formData: FormData) {
   const organizationName = readText(formData, "organizationName");
   const idNumber = readText(formData, "idNumber");
 
-  if (name.length < 2 || name.length > 120 || !phone || (email && (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) || organizationName.length > 160 || idNumber.length > 100) {
-    return { ok: false, error: "Enter a valid name, Zimbabwe mobile number, optional email, organization, and optional ID number." };
+  if (name.length < 2 || name.length > 120 || !phone || email.length > 254 ||
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || organizationName.length > 160 || idNumber.length > 100) {
+    return { ok: false, error: "Enter a valid name, Zimbabwe mobile number, admin email, organization, and optional ID number." };
   }
 
+  let createdAdminId: string | undefined;
+  let invitedAuthUserId: string | undefined;
+  let supabaseAdmin: ReturnType<typeof createSupabaseAdminClient> | undefined;
   try {
     const [existing] = await db.select({ id: adminUsers.id })
       .from(adminUsers).where(eq(adminUsers.phone, phone)).limit(1);
     if (existing) return { ok: false, error: "That phone number already belongs to an admin account." };
+    const [existingEmail] = await db.select({ id: adminUsers.id })
+      .from(adminUsers).where(eq(sql`lower(${adminUsers.email})`, email)).limit(1);
+    if (existingEmail) return { ok: false, error: "That email already belongs to an admin account." };
     const [count] = await db.select({ value: sql<number>`count(*)::int` }).from(adminUsers);
     if (Number(count.value) >= adminLimit) {
       return { ok: false, error: `The limit of ${adminLimit} admin accounts has been reached.` };
     }
 
-    await db.insert(adminUsers).values({
+    const [created] = await db.insert(adminUsers).values({
       name,
       phone,
-      email: email || null,
-      passwordHash: null,
+      email,
       organizationName: organizationName || null,
       idNumberEncrypted: encryptOptionalId(idNumber),
       canManageAdmins: false,
-      mustChangePassword: false,
-    });
+    }).returning({ id: adminUsers.id });
+    if (!created) throw new Error("The admin account could not be saved.");
+    createdAdminId = created.id;
+
+    const authUser = await findOrInviteSupabaseUser(email);
+    supabaseAdmin = authUser.supabase;
+    invitedAuthUserId = authUser.invited ? authUser.userId : undefined;
+    const [linked] = await db.update(adminUsers)
+      .set({ authUserId: authUser.userId, mustChangePassword: authUser.invited })
+      .where(and(eq(adminUsers.id, created.id), isNull(adminUsers.authUserId)))
+      .returning({ id: adminUsers.id });
+    if (!linked) throw new Error("The new admin account could not be linked to Supabase Auth.");
+
     revalidatePath("/admin");
-    return { ok: true };
+    return { ok: true, invited: authUser.invited };
   } catch (error) {
     console.error("Could not create admin account", error);
-    return { ok: false, error: "Could not create the admin account. Please try again." };
+    if (createdAdminId) {
+      try {
+        await db.delete(adminUsers).where(eq(adminUsers.id, createdAdminId));
+      } catch (cleanupError) {
+        console.error("Could not roll back an incomplete admin account", cleanupError);
+      }
+    }
+    if (invitedAuthUserId && supabaseAdmin) {
+      const { error: deleteError } = await supabaseAdmin.auth.admin.deleteUser(invitedAuthUserId);
+      if (deleteError) console.error("Could not remove an orphaned Supabase invitation", deleteError);
+    }
+    const message = error instanceof Error ? error.message : "";
+    return {
+      ok: false,
+      error: message.includes("SUPABASE_SERVICE_ROLE_KEY") || message.includes("unconfirmed Supabase Auth account")
+        ? message
+        : "Could not create the admin account. Please try again.",
+    };
+  }
+}
+
+export async function inviteAdminAccount(input: { adminId: string }) {
+  await requireAdminManager();
+  const adminId = typeof input?.adminId === "string" ? input.adminId : "";
+  if (!/^[\da-f]{8}-(?:[\da-f]{4}-){3}[\da-f]{12}$/i.test(adminId)) {
+    return { ok: false, error: "The admin account selected for invitation is invalid." };
+  }
+
+  try {
+    const [account] = await db.select({
+      id: adminUsers.id,
+      email: adminUsers.email,
+      authUserId: adminUsers.authUserId,
+    }).from(adminUsers).where(eq(adminUsers.id, adminId)).limit(1);
+    if (!account) return { ok: false, error: "Admin account not found." };
+    if (!account.email) return { ok: false, error: "Add an admin sign-in email before sending an invitation." };
+    if (account.authUserId) return { ok: true, invited: false };
+
+    const authUser = await findOrInviteSupabaseUser(account.email.toLowerCase());
+    const [linked] = await db.update(adminUsers)
+      .set({
+        authUserId: authUser.userId,
+        ...(authUser.invited ? { mustChangePassword: true } : {}),
+      })
+      .where(and(eq(adminUsers.id, account.id), isNull(adminUsers.authUserId)))
+      .returning({ id: adminUsers.id });
+    if (!linked) {
+      const [current] = await db.select({ authUserId: adminUsers.authUserId })
+        .from(adminUsers).where(eq(adminUsers.id, account.id)).limit(1);
+      if (current?.authUserId !== authUser.userId) {
+        throw new Error("The admin account was linked to a different Supabase user.");
+      }
+    }
+
+    revalidatePath("/admin");
+    return { ok: true, invited: authUser.invited };
+  } catch (error) {
+    console.error("Could not invite admin account", error);
+    const message = error instanceof Error ? error.message : "";
+    return {
+      ok: false,
+      error: message.includes("SUPABASE_SERVICE_ROLE_KEY") || message.includes("unconfirmed Supabase Auth account")
+        ? message
+        : "Could not send or link the Supabase invitation. Please try again.",
+    };
   }
 }
 
@@ -81,17 +189,40 @@ export async function updateAdminDetails(formData: FormData) {
   const organizationName = readText(formData, "organizationName");
   const idNumber = readText(formData, "idNumber");
   if (!/^[\da-f]{8}-(?:[\da-f]{4}-){3}[\da-f]{12}$/i.test(adminId) ||
-      name.length < 2 || name.length > 120 || (email && (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) || organizationName.length > 160 || idNumber.length > 100) {
+      name.length < 2 || name.length > 120 || email.length > 254 ||
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || organizationName.length > 160 || idNumber.length > 100) {
     throw new Error("Enter valid admin profile details.");
   }
 
-  const [account] = await db.select({ id: adminUsers.id })
+  const [account] = await db.select({
+    id: adminUsers.id,
+    email: adminUsers.email,
+    authUserId: adminUsers.authUserId,
+  })
     .from(adminUsers).where(eq(adminUsers.id, adminId)).limit(1);
   if (!account) throw new Error("Admin account not found.");
 
+  const [emailOwner] = await db.select({ id: adminUsers.id })
+    .from(adminUsers)
+    .where(and(
+      eq(sql`lower(${adminUsers.email})`, email),
+      ne(adminUsers.id, adminId),
+    ))
+    .limit(1);
+  if (emailOwner) throw new Error("That email already belongs to another admin account.");
+
+  if (account.authUserId && account.email?.toLowerCase() !== email) {
+    const supabase = createSupabaseAdminClient();
+    const { error } = await supabase.auth.admin.updateUserById(account.authUserId, { email });
+    if (error) {
+      console.error("Could not update the admin Supabase Auth email", error);
+      throw new Error("Could not update the admin sign-in email.");
+    }
+  }
+
   await db.update(adminUsers).set({
     name,
-    email: email || null,
+    email,
     organizationName: organizationName || null,
     idNumberEncrypted: encryptOptionalId(idNumber),
   }).where(eq(adminUsers.id, adminId));

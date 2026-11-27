@@ -1,8 +1,10 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   createAdminAccount,
+  inviteAdminAccount,
   revokeAdminAccount,
   requestAdminPhoneChange,
   updateAdminDetails,
@@ -11,6 +13,7 @@ import {
 
 export type AdminAccountSummary = {
   id: string;
+  hasSupabaseAuth: boolean;
   name: string;
   phone: string;
   email: string | null;
@@ -18,6 +21,41 @@ export type AdminAccountSummary = {
   idNumberLastFour: string | null;
   canManageAdmins: boolean;
 };
+
+function AdminAuthInvite({ adminId }: { adminId: string }) {
+  const router = useRouter();
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function sendInvite() {
+    setBusy(true);
+    setMessage("");
+    try {
+      const result = await inviteAdminAccount({ adminId });
+      if (!result.ok) {
+        setMessage(result.error ?? "Could not send the Supabase invitation.");
+        return;
+      }
+      setMessage(result.invited
+        ? "Supabase invitation sent."
+        : "Linked to an existing Supabase account. The admin can sign in or request an email password reset.");
+      router.refresh();
+    } catch {
+      setMessage("Could not send the Supabase invitation. Please try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div style={{ marginTop: 10 }}>
+      <button className="btn btn-navy btn-sm" type="button" onClick={sendInvite} disabled={busy}>
+        {busy ? "Sending…" : "Send Supabase invite"}
+      </button>
+      {message && <p className="small notice" role="status">{message}</p>}
+    </div>
+  );
+}
 
 function AdminPhoneChange({ admin }: { admin: AdminAccountSummary }) {
   const [phone, setPhone] = useState("");
@@ -106,7 +144,9 @@ export function AdminAccountsPanel({
       setError(result.error ?? "Could not create the admin account.");
       return;
     }
-    setCreatedMessage("Admin account created. The admin can set their password at first sign-in using an SMS code sent to their phone.");
+    setCreatedMessage(result.invited
+      ? "Admin account created. A Supabase invitation was sent to their email."
+      : "Admin account created and linked to an existing Supabase account. They can sign in or request an email password reset.");
     form.reset();
   }
 
@@ -121,7 +161,7 @@ export function AdminAccountsPanel({
             <div style={{ flex: 1, minWidth: 0 }}>
               <strong>{account.name}</strong>
               <div className="meta">
-                {account.phone} · {account.email || "No reset email"} · {account.organizationName || "No organization"} · {account.canManageAdmins ? "Admin manager" : "Admin"}
+                {account.phone} · {account.email || "No sign-in email"} · {account.organizationName || "No organization"} · {account.canManageAdmins ? "Admin manager" : "Admin"}
                 {account.idNumberLastFour ? ` · ID ending ${account.idNumberLastFour}` : " · No ID number"}
               </div>
               {canManageAdmins && (
@@ -131,12 +171,13 @@ export function AdminAccountsPanel({
                     <form action={updateAdminDetails} className="form-grid" style={{ marginTop: 10 }}>
                       <input type="hidden" name="adminId" value={account.id} />
                       <label className="field">Name<input name="name" defaultValue={account.name} required minLength={2} maxLength={120} /></label>
-                      <label className="field">Reset email<input name="email" type="email" defaultValue={account.email || ""} maxLength={254} /></label>
+                      <label className="field">Admin sign-in email<input name="email" type="email" defaultValue={account.email || ""} maxLength={254} required /></label>
                       <label className="field">Organization<input name="organizationName" defaultValue={account.organizationName || ""} maxLength={160} /></label>
                       <label className="field">Optional ID number<input name="idNumber" maxLength={100} autoComplete="off" placeholder={account.idNumberLastFour ? "Enter to replace; blank removes it" : "Optional"} /></label>
                       <button className="btn btn-navy btn-sm" type="submit">Save details</button>
                     </form>
                   </details>
+                  {account.email && !account.hasSupabaseAuth && <AdminAuthInvite adminId={account.id} />}
                   <AdminPhoneChange admin={account} />
                 </>
               )}
@@ -155,10 +196,10 @@ export function AdminAccountsPanel({
             <form onSubmit={createAccount} className="form-grid" style={{ padding: 18 }}>
               <label className="field">Full name<input name="name" required minLength={2} maxLength={120} /></label>
               <label className="field">Zimbabwe phone<input name="phone" type="tel" placeholder="+263 77 123 4567" required /></label>
-              <label className="field">Supabase reset email<input name="email" type="email" maxLength={254} /></label>
+              <label className="field">Admin sign-in email<input name="email" type="email" maxLength={254} required /></label>
               <label className="field">Organization name<input name="organizationName" maxLength={160} /></label>
               <label className="field">Optional ID number<input name="idNumber" maxLength={100} autoComplete="off" /></label>
-              <p className="small muted">The admin sets their own password at first sign-in after verifying their phone by SMS. ID numbers are encrypted at rest.</p>
+              <p className="small muted">Supabase will email the new admin an invitation to set their password. ID numbers are encrypted at rest.</p>
               <button className="btn btn-primary" type="submit" disabled={busy}>{busy ? "Creating…" : "Create admin account"}</button>
             </form>
             {createdMessage && <p className="notice" role="status" style={{ margin: 18 }}>{createdMessage}</p>}

@@ -3,7 +3,10 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export async function GET(request: NextRequest) {
   const code = request.nextUrl.searchParams.get("code");
-  const next = request.nextUrl.searchParams.get("next") ?? "/admin";
+  const requestedNext = request.nextUrl.searchParams.get("next");
+  const next = requestedNext === "/admin/change-password" || requestedNext === "/admin/reset-password"
+    ? requestedNext
+    : "/admin";
   if (!code) return NextResponse.redirect(new URL("/admin/sign-in", request.url));
 
   const supabase = await createSupabaseServerClient();
